@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+envoy.sh
 # C extensions
 *.so
 
