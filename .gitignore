@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 envoy.sh
+.enphase.secret.ini
 # C extensions
 *.so
 

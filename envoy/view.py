@@ -44,12 +44,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     baseName = os.path.basename(__file__)
     # read the configuration file
-    config = utils.GetConfigFromFilePath(args.configDir, baseName)
+    config = utils.GetConfigFromDirAndBaseName(args.configDir, baseName)
 
     # Get the logger setup
     logConfig = LogConfig(args.configDir, config, baseName)
     logger = logConfig.ConfigLog(config['LOGGING']['logType'])
     # setup access to pystore
     view = View(logger, config)
-    prod = view.get_df("production")
-    print(prod)
+    invrt = view.get_df("invertors")
+    print(invrt)

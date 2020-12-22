@@ -90,7 +90,7 @@ def FlattenDict(pDict, delim):
     return dict(myitems())
 
 
-def GetConfigFromFilePath(cfgPath, baseName):
+def GetConfigFromDirAndBaseName(cfgPath, baseName):
     '''
         Get the config information and return to caller
     '''
@@ -98,6 +98,24 @@ def GetConfigFromFilePath(cfgPath, baseName):
     lConfigPath = GetConfigFile(cfgPath, baseName)
     if os.path.exists(lConfigPath):
         config.read(lConfigPath)
+    else:
+        raise Exception('missing file %s', lConfigPath)
+    return config
+
+
+
+def GetConfigFromFilePath(cfgPath):
+    '''
+        Get the config information and return to caller
+    '''
+    config = configparser.ConfigParser()
+    if os.path.exists(cfgPath):
+        config.read(cfgPath)
+    else:
+        raise Exception('missing file %s', cfgPath)
+    for each_section in config.sections():
+        for (each_key, each_val) in config.items(each_section):
+                print (each_key, each_val)
     return config
 
 

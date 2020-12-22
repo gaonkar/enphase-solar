@@ -9,6 +9,8 @@ import requests
 import pprint
 import pystore
 import pandas as pd
+from suntime import Sun, SunTimeException
+import datetime 
 
 #import from common folder
 curFileP = os.path.dirname(os.path.realpath(__file__))
@@ -17,6 +19,7 @@ sys.path.insert(0, commonWP)
 import utils
 from logconfig import LogConfig
 
+   
 class Ingest:
     def __init__(self, logger, config):
         self.logger = logger
@@ -24,6 +27,7 @@ class Ingest:
         self.url = config['DEFAULT']['url']
         self.username=config['DEFAULT']['user']
         self.data_path = config['DEFAULT']['data_path']
+        self.password='000102'
         self.now = dt.date.today().strftime("%Y-%m-%d")
         self.logger.debug(self.now)
         pystore.set_path(self.data_path)
@@ -47,31 +51,29 @@ class Ingest:
 
            
     def get_http_basicauth(self, urlpath):
-        from base64 import b64encode
-        url = os.path.join(self.url, urlpath)
-        #headers = { 'Content-Type': 'application/json' , 'Authorization' :'Basic ENCODESTRINGHERE'}   
-        self.logger.debug("Fetching basicauth data from " + url)
-        try:
-            res = requests.get(url, headers=headers)
-            return res.json()
+        '''
+            Using requests from python does seem to honor basic auth. It could be becaus envoy is an http url
+        '''
+        import subprocess
 
+        url = os.path.join(self.url, urlpath)
+
+        try:
+            cmd = "curl -s --anyauth --user %s:%s %s" % (self.username, self.password, url)
+            cmd = cmd.split(" ")
+            print(cmd)
+            result = subprocess.run(cmd, stdout=subprocess.PIPE)
+            result = result.stdout.decode('ascii')
+            result = result.replace('\n','')
+            #result = result.replace('"','\\"')
+            return json.loads(result)
+        
         except Exception as e:
-            self.logger.erro("get_data failure" + str(e))
+            self.logger.error("get_data failure" + str(e))
             return None
 
-    def print_pretty(self, jsonbytes):
-        self.logger.debug("JSON Print Pretty")
-        jsonstr = jsonbytes.decode("utf-8")
-        on_object = json.loads(jsonstr)
-        json_formatted_str = json.dumps(json_object, indent=2)
-        print(json_formatted_str)
     
     def store_data(self, item, df):
-        del df['measurementType']
-        del df['type']
-        df = df.apply(pd.to_numeric)
-        df['Date'] = pd.to_datetime(df['readingTime'], unit='s')
-        df = df.set_index('Date')
         try:
             if item not in self.collection.items:
                 self.collection.write(item, df)
@@ -96,7 +98,64 @@ class Ingest:
         self.rdict = rdict
         for e in rdict:
             df = pd.DataFrame.from_dict(rdict[e], orient='index').T
+            del df['measurementType']
+            del df['type']
+            df = df.apply(pd.to_numeric)
+            df['Date'] = pd.to_datetime(df['readingTime'], unit='s')
+            df = df.set_index('Date')
             self.store_data(e, df) 
+    
+    def get_inverters_info(self):
+        gdict = daily.get_http_basicauth("api/v1/production/inverters")
+        
+        if gdict is None:
+            print("no data")
+            return
+        epoch_time = int(time.time())
+        df = pd.DataFrame(gdict)
+        df.insert(0, 'Date', range(epoch_time, epoch_time + len(df)))
+        df = df.apply(pd.to_numeric)
+        df['Date'] = pd.to_datetime(df['Date'], unit='s')
+        df = df.set_index('Date')
+        #print(df)
+        self.store_data("invertors", df)
+
+class Localize:
+    '''
+        Class to determine local timezone and manage local API
+    '''
+    def __init__(self, logger, config):
+
+        self.logger = logger
+        self.latitude = float(config['DEFAULT']['latitude'])
+        self.longitude = float(config['DEFAULT']['longitude'])
+        
+        sun = Sun(self.latitude, self.longitude)
+        today_sr = sun.get_local_sunrise_time() 
+        today_ss = sun.get_local_sunset_time() 
+
+        self.sunrise = today_sr.strftime('%H:%M')
+        self.sunset = today_ss.strftime('%H:%M')
+        logger.debug("Sunrise:" + self.sunrise + "Sunset:" + self.sunset)
+    
+    def isSunVisible(self):
+        t0 = time.time()
+        timestr = time.strftime("%H:%M",time.localtime(t0)) 
+        logger.debug("Sunrise:" + self.sunrise + "Sunset:" + self.sunset + "CurTime:" + timestr)
+        if timestr >= self.sunrise and timestr <= self.sunset:
+            return True
+        return False
+
+    def isSunSet(self):
+        t0 = time.time()
+        timestr = time.strftime("%H:%M",time.localtime(t0)) 
+        logger.debug("Sunrise:" + self.sunrise + "Sunset:" + self.sunset + "CurTime:" + timestr)
+        if timestr > self.sunset:
+            return True
+        return False
+    
+
+
 
 # main() will be executed
 if __name__ == '__main__':
@@ -109,13 +168,20 @@ if __name__ == '__main__':
     args = parser.parse_args()
     baseName = os.path.basename(__file__)
     # read the configuration file
-    config = utils.GetConfigFromFilePath(args.configDir, baseName)
+    bconfig = utils.GetConfigFromDirAndBaseName(args.configDir, baseName)
+    private = utils.GetConfigFromFilePath(bconfig['DEFAULT']['private'])
 
-    # Get the logger setup
-    logConfig = LogConfig(args.configDir, config, baseName)
-    logger = logConfig.ConfigLog(config['LOGGING']['logType'])
-    daily = Ingest(logger, config)
+    #Get the logger setup
+    logConfig = LogConfig(args.configDir, bconfig, baseName)
+    logger = logConfig.ConfigLog(bconfig['LOGGING']['logType'])
+   
+    local = Localize(logger, private)
+    daily = Ingest(logger, bconfig)
+    
     while True:
-        #Get the data every 10 seconds and store it into the pystore
-        daily.get_global_info()
-        time.sleep(10)
+        while local.isSunVisible():
+            daily.get_global_info()
+            daily.get_inverters_info()
+            time.sleep(20)
+        time.sleep(60)
+        print("waiting")
